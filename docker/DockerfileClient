@@ -1,0 +1,12 @@
+FROM debian
+
+USER root
+
+RUN apt update && \
+   apt install curl -y;
+
+WORKDIR /scripts
+
+CMD "chmod +x /scripts/client.sh";
+   
+ENTRYPOINT ["/scripts/client.sh"]

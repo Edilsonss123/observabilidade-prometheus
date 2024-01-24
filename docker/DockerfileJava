@@ -1,0 +1,9 @@
+FROM maven:3.8.1-openjdk-11-slim
+
+RUN mvn -version
+
+# Set the working directory in the container
+WORKDIR /usr/src/myapp
+
+CMD mvn -B dependency:resolve dependency:resolve-plugins \
+chmod +x /usr/src/myapp/start.sh

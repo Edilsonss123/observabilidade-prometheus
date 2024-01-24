@@ -1,0 +1,140 @@
+version: '3.6'
+
+services:
+  redis-forum-api:
+    image: redis
+    container_name: redis-forum-api
+    restart: unless-stopped
+    command: redis-server --requirepass Redis2024
+    volumes: 
+      - ./data/redis:/data
+    ports:
+      - 6379:6379
+    networks:
+      - observabilidade-grafana-network
+
+  mysql-forum-api:
+    image: mysql:5.7
+    container_name: mysql-forum-api
+    command: --default-authentication-plugin=mysql_native_password
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: 'forum'
+      MYSQL_USER: 'forum'
+      MYSQL_PASSWORD: 'Bk55yc1u0eiqga6e'
+      MYSQL_RANDOM_ROOT_PASSWORD: 'yes'
+      MYSQL_ROOT_HOST: '%'
+      MYSQL_ROOT_PASSWORD: root
+    volumes:
+      - ./data/script/database:/docker-entrypoint-initdb.d
+      - ./data/mysql:/var/lib/mysql
+    ports:
+      - 2420:3306
+    networks:
+      - observabilidade-grafana-network
+    depends_on:
+      - redis-forum-api
+
+  java-forum-api:
+    build:
+      context: ./docker
+      dockerfile: DockerfileJava
+    container_name: java-forum-api
+    tty: true
+    depends_on:
+    - redis-forum-api
+    - mysql-forum-api
+    volumes:
+    - ./app:/usr/src/myapp 
+    working_dir: /usr/src/myapp
+    command: sh -c "mvn clean package && java -jar -Xms128M -Xmx128M -XX:PermSize=64m -XX:MaxPermSize=128m -Dspring.profiles.active=prod target/forum.jar"
+    ports:
+      - 8124:8080
+    networks:
+      - observabilidade-grafana-network
+    healthcheck:
+      test: "curl -sS http://java-forum-api:8080/actuator/health"
+      interval: 1s
+      timeout: 30s
+      retries: 60
+
+  proxy-forum-api:
+    image: nginx
+    container_name: proxy-forum-api
+    restart: unless-stopped
+    volumes:
+      - ./data/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./data/nginx/proxy.conf:/etc/nginx/conf.d/proxy.conf
+    ports:
+      - 8125:80
+    networks:
+      - observabilidade-grafana-network
+    depends_on:
+      - java-forum-api
+
+  prometheus-forum-api:
+    image: prom/prometheus:latest
+    container_name: prometheus-forum-api
+    restart: unless-stopped
+    volumes:
+      - ./data/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./data/prometheus/alert.rules:/etc/prometheus/alert.rules
+      - ./data/prometheus/prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    ports:
+      - 8126:9090
+    networks:
+      - observabilidade-grafana-network
+    depends_on:
+      - proxy-forum-api
+
+  alertmanager-forum-api: 
+    image: prom/alertmanager
+    container_name: alertmanager-forum-api
+    volumes: 
+      - ./data/alertmanager:/etc/alertmanager/:ro
+    ports: 
+      - 9093:9093
+    command: 
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    networks:
+      - observabilidade-grafana-network
+    depends_on:
+      - prometheus-forum-api
+
+  grafana-forum-api:
+    image: grafana/grafana
+    container_name: grafana-forum-api
+    volumes:
+      - ./data/grafana:/var/lib/grafana
+    restart: unless-stopped
+    ports:
+      - 8127:3000
+    networks:
+      - observabilidade-grafana-network
+    depends_on:
+      - alertmanager-forum-api
+
+  client-forum-api:
+    build:
+      context: ./docker/
+      dockerfile: DockerfileClient
+    image: client-forum-api
+    container_name: client-forum-api
+    restart: unless-stopped
+    volumes:
+      - ./data/script/client:/scripts/
+    networks:
+        - observabilidade-grafana-network
+    depends_on:
+      - grafana-forum-api
+
+
+networks:
+  observabilidade-grafana-network:
+    name: observabilidade-grafana-network
